@@ -1,7 +1,7 @@
 "use client";
 
 import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { getAuthInstance } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 
 export default function Navbar() {
@@ -14,7 +14,7 @@ export default function Navbar() {
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-500">{user?.email}</span>
           <button
-            onClick={() => signOut(auth)}
+            onClick={() => signOut(getAuthInstance())}
             className="text-sm text-red-600 hover:text-red-800 cursor-pointer"
           >
             Logout

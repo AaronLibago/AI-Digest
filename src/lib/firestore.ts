@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "./firebase";
+import { getDbInstance } from "./firebase";
 
 export interface WorkflowSettings {
   emailRecipient: string;
@@ -12,14 +12,16 @@ export interface WorkflowSettings {
   linkedinUserPrompt: string;
 }
 
-const SETTINGS_DOC = doc(db, "settings", "workflow-config");
+function getSettingsDoc() {
+  return doc(getDbInstance(), "settings", "workflow-config");
+}
 
 export async function getSettings(): Promise<WorkflowSettings | null> {
-  const snap = await getDoc(SETTINGS_DOC);
+  const snap = await getDoc(getSettingsDoc());
   if (!snap.exists()) return null;
   return snap.data() as WorkflowSettings;
 }
 
 export async function saveSettings(settings: WorkflowSettings): Promise<void> {
-  await setDoc(SETTINGS_DOC, settings);
+  await setDoc(getSettingsDoc(), settings);
 }

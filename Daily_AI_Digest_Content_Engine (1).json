@@ -1,0 +1,655 @@
+{
+  "name": "Daily_AI_Digest_Content_Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "ab83fc09-3ed5-4589-bffd-ba8c9b72d9b4",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -192,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 20,
+        "filters": {
+          "q": "newer_than:1d label:AI-Digest"
+        }
+      },
+      "id": "0180efa2-858d-485f-9cd3-520687bb5b98",
+      "name": "Gmail Search",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        48,
+        1600
+      ],
+      "webhookId": "5b747b90-d479-410b-b6c9-2950b5ccab02",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JIQyraRI17jI5aax",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const rawB64 = $json.raw || '';\n\nif (!rawB64) {\n  throw new Error('No raw field found. Check HTTP Request node output.');\n}\n\nconst rawEmail = Buffer.from(\n  rawB64.replace(/-/g, '+').replace(/_/g, '/'),\n  'base64'\n).toString('utf-8');\n\nconst bodyStart = rawEmail.indexOf('\\r\\n\\r\\n');\nconst fullBody = bodyStart > -1 ? rawEmail.substring(bodyStart + 4) : rawEmail;\n\nconst boundary = rawEmail.match(/boundary=\"([^\"]+)\"/)?.[1];\nlet extractedText = '';\n\nif (boundary) {\n  const parts = fullBody.split('--' + boundary);\n  for (const part of parts) {\n    const ph = part.indexOf('\\r\\n\\r\\n');\n    if (ph === -1) continue;\n    const headers = part.substring(0, ph).toLowerCase();\n    const body = part.substring(ph + 4);\n    if (headers.includes('text/plain') || headers.includes('text/html')) {\n      const qp = body.replace(/=\\r\\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));\n      if (qp.length > extractedText.length) extractedText = qp;\n    }\n  }\n}\n\nextractedText = extractedText || fullBody;\n\nconst text = extractedText\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n  .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\")\n  .replace(/\\s\\s+/g, '\\n').trim();\n\nreturn {\n  subject: $json.Subject || 'No Subject',\n  sender: $json.From || '',\n  date: $json.internalDate || '',\n  clean_text: text\n};"
+      },
+      "id": "1d4b8f0f-e633-4fcf-9389-e9db81b82fc6",
+      "name": "Clean HTML to Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let combined = '';\n\nfor (const item of items) {\n  const subject = item.json.subject || 'No Subject';\n  const date = item.json.date || item.json.internalDate || '';\n  const text = item.json.clean_text || '';\n\n  combined += `\\n\\n---\\n\\nSOURCE: ${subject}\\nDATE: ${date}\\n\\n`;\n  combined += text;\n}\n\nreturn [{\n  json: {\n    digest_text: combined.trim(),\n    email_count: items.length\n  }\n}];"
+      },
+      "id": "f1c7390b-714d-4dfc-beac-9d7b33f75785",
+      "name": "Combine All Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const digestText = items[0].json.digest_text || '';\nconst emailCount = items[0].json.email_count || 0;\n\nif (!digestText || digestText.length < 50) {\n  throw new Error(`Email body too short (${digestText.length} chars). Clean HTML to Text node is not extracting content. Check Gmail Get Message format is set to RAW.`);\n}\n\nconst body = {\n  model: 'gpt-4o',\n  temperature: 0.3,\n  max_tokens: 2000,\n  messages: [\n    {\n      role: 'system',\n      content: 'You are an expert AI analyst. Extract signal, not hype. Return valid JSON only. No markdown. No code fences. No preamble.'\n    },\n    {\n      role: 'user',\n      content: `From the content below, extract the 10 most important AI developments.\\nRank by long-term significance.\\nReturn a STRICT JSON array where each item has exactly these fields:\\n  rank (number),\\n  title (string),\\n  one_sentence_summary (string),\\n  why_it_matters (string),\\n  practical_implication (string),\\n  risk_or_opportunity (string)\\n\\nContent:\\n${digestText}\\n\\nReturn JSON array only. No markdown. No explanation.`\n    }\n  ]\n};\n\nreturn [{\n  json: {\n    requestBody: JSON.stringify(body),\n    email_count: emailCount\n  }\n}];"
+      },
+      "id": "4f14de42-b5b6-450c-b265-644d0d7eab9a",
+      "name": "Build Extract Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c5a49dcf-6b74-4a51-a13d-53aac9a4c8f4",
+      "name": "Extract Top 10 AI Developments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1152,
+        1600
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "M5wvsYYjdFFr59Fc",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let parsed;\nconst raw = $json.choices?.[0]?.message?.content || '';\n\nif (!raw || raw.trim() === '[]') {\n  throw new Error('OpenAI returned empty array. Email body is still empty — check Clean HTML to Text output has actual content.');\n}\n\nconst cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\n\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('JSON parse failed. OpenAI returned: ' + raw.substring(0, 400));\n}\n\nif (!Array.isArray(parsed)) {\n  if (parsed.developments) parsed = parsed.developments;\n  else if (parsed.items) parsed = parsed.items;\n  else throw new Error('Expected array, got: ' + typeof parsed);\n}\n\nreturn [{ json: { top10: parsed } }];"
+      },
+      "id": "1969ccf6-56b2-4630-99da-7b3c22440a68",
+      "name": "Parse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const top10 = $json.top10;\n\nconst body = {\n  model: 'gpt-4o',\n  temperature: 0.6,\n  max_tokens: 3000,\n  messages: [\n    {\n      role: 'system',\n      content: 'You are writing a strategic AI newsletter article for a sophisticated audience of business leaders, technologists, and investors.'\n    },\n    {\n      role: 'user',\n      content: `Using the ranked AI developments below, write a 900-1200 word Substack article analyzing the trajectory of AI.\\n\\nRequirements:\\n- Strategic, composed tone\\n- Focus on patterns and 2-5 year implications\\n- 3-5 section headers (use ## for headers)\\n- Close with a 'What to Watch Next' section\\n- Do not mechanically list items, weave them into narrative\\n- Start with a compelling hook\\n\\nIdeas:\\n${JSON.stringify(top10, null, 2)}\\n\\nReturn plain text only.`\n    }\n  ]\n};\n\nreturn { requestBody: JSON.stringify(body), top10 };"
+      },
+      "id": "d94d144c-9d2d-45c1-87d3-ccfd002fddac",
+      "name": "Build Substack Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "1add9665-068c-4030-b876-851b97c366a4",
+      "name": "Generate Substack Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1808,
+        1472
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "M5wvsYYjdFFr59Fc",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const top10 = $json.top10;\n\nconst body = {\n  model: 'gpt-4o',\n  temperature: 0.6,\n  max_tokens: 1800,\n  messages: [\n    {\n      role: 'system',\n      content: 'You are writing a professional LinkedIn article for AI implementation leaders, operators, and business owners who want to apply AI practically.'\n    },\n    {\n      role: 'user',\n      content: `Using the AI developments below, write a 500-800 word LinkedIn article focused on practical applications and automation.\\n\\nRequirements:\\n- Clear structure with 5-7 short sections (use ## for headers)\\n- 3 specific actionable steps readers can take this week\\n- 1 example automation workflow described concretely\\n- Professional but conversational tone\\n- End with exactly one engagement question for readers\\n\\nIdeas:\\n${JSON.stringify(top10, null, 2)}\\n\\nReturn plain text only.`\n    }\n  ]\n};\n\nreturn { requestBody: JSON.stringify(body), top10 };"
+      },
+      "id": "bc285b4f-b86c-4ed6-a191-016108bf886f",
+      "name": "Build LinkedIn Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        1728
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "59854ed2-7b2b-4887-8493-7165ce59e53e",
+      "name": "Generate LinkedIn Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1808,
+        1728
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "M5wvsYYjdFFr59Fc",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const content = $json.choices?.[0]?.message?.content || '';\nreturn { article_content: content };"
+      },
+      "id": "73bf9901-49d4-4c7a-b80f-28476747ad3f",
+      "name": "Extract Substack Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "folderId": "1OLsundZ1EmNzHhLhNL9eMd6S7EWP1upo",
+        "title": "=AI Trajectory Digest - {{ $now.toFormat('yyyy-MM-dd') }}"
+      },
+      "id": "c792cb98-9ec8-47ca-b5bb-f9414af3ba6e",
+      "name": "Create Substack Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        1472
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "13HKRY9hfDiXEeRD",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const content = $json.choices?.[0]?.message?.content || '';\nreturn { article_content: content };"
+      },
+      "id": "6c5a80dc-343e-4449-86a8-3a34f0030ee7",
+      "name": "Extract LinkedIn Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        1728
+      ]
+    },
+    {
+      "parameters": {
+        "folderId": "1OLsundZ1EmNzHhLhNL9eMd6S7EWP1upo",
+        "title": "=AI Trajectory Digest - {{ $now.toFormat('yyyy-MM-dd') }}"
+      },
+      "id": "a9cf2160-c1ac-4b07-921f-409507735529",
+      "name": "Create LinkedIn Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        1728
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "13HKRY9hfDiXEeRD",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "52281ae5-7fc7-47ed-81ab-3cff5f114809",
+      "name": "Merge Docs",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2624,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "aaroncarllibago@gmail.com",
+        "subject": "=Daily AI Digest Drafts Ready - {{ $now.format('YYYY-MM-DD') }}",
+        "message": "==<div style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;\">\n  <div style=\"background:#1A56A0;padding:24px;border-radius:8px 8px 0 0;\">\n    <h2 style=\"color:#fff;margin:0;\">Daily AI Digest Ready ✅</h2>\n    <p style=\"color:#c8dcff;margin:4px 0 0;\">{{ $now.toFormat('MMMM d, yyyy') }}</p>\n  </div>\n  <div style=\"background:#f9f9f9;padding:24px;border-radius:0 0 8px 8px;border:1px solid #eee;\">\n    <h3>📄 Substack Draft</h3>\n    <p><a href=\"https://docs.google.com/document/d/{{ $('Create Substack Doc').first().json.id }}/edit\">Open Substack Draft →</a></p>\n    <h3>💼 LinkedIn Draft</h3>\n    <p><a href=\"https://docs.google.com/document/d/{{ $('Create LinkedIn Doc').first().json.id }}/edit\">Open LinkedIn Draft →</a></p>\n    <hr/>\n    <p style=\"color:#999;font-size:11px;\">Human Co-Pilot AI Digest Engine</p>\n  </div>\n</div>",
+        "options": {}
+      },
+      "id": "5c6ad667-55be-4e29-9d7b-a09103bdb672",
+      "name": "Email Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2800,
+        1632
+      ],
+      "webhookId": "167dec0f-632c-48bf-bdb1-d103672b3864",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JIQyraRI17jI5aax",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/gmail/v1/users/me/messages/{{ $json.id }}?format=raw",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        256,
+        1600
+      ],
+      "id": "02780d6c-efd2-47e6-99d5-3ba4f706bd95",
+      "name": "HTTP Request",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JIQyraRI17jI5aax",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $node['Extract Substack Text'].json.article_content }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        1472
+      ],
+      "id": "852de960-6143-45c6-aa48-4d3a1ac5b4b0",
+      "name": "Update a document",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "13HKRY9hfDiXEeRD",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('Extract LinkedIn Text').item.json.article_content }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        1728
+      ],
+      "id": "763d5f2e-33b9-4dd6-8f13-f1749e9fecf0",
+      "name": "Update a document1",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "13HKRY9hfDiXEeRD",
+          "name": "AI Digest"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Gmail Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Search": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean HTML to Text": {
+      "main": [
+        [
+          {
+            "node": "Combine All Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine All Emails": {
+      "main": [
+        [
+          {
+            "node": "Build Extract Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Extract Request": {
+      "main": [
+        [
+          {
+            "node": "Extract Top 10 AI Developments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Top 10 AI Developments": {
+      "main": [
+        [
+          {
+            "node": "Parse JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse JSON": {
+      "main": [
+        [
+          {
+            "node": "Build Substack Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build LinkedIn Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Substack Request": {
+      "main": [
+        [
+          {
+            "node": "Generate Substack Article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Substack Article": {
+      "main": [
+        [
+          {
+            "node": "Extract Substack Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Substack Text": {
+      "main": [
+        [
+          {
+            "node": "Create Substack Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LinkedIn Request": {
+      "main": [
+        [
+          {
+            "node": "Generate LinkedIn Article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate LinkedIn Article": {
+      "main": [
+        [
+          {
+            "node": "Extract LinkedIn Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract LinkedIn Text": {
+      "main": [
+        [
+          {
+            "node": "Create LinkedIn Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Substack Doc": {
+      "main": [
+        [
+          {
+            "node": "Update a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create LinkedIn Doc": {
+      "main": [
+        [
+          {
+            "node": "Update a document1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Docs": {
+      "main": [
+        [
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Clean HTML to Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a document": {
+      "main": [
+        [
+          {
+            "node": "Merge Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a document1": {
+      "main": [
+        [
+          {
+            "node": "Merge Docs",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "463ba6c1-b6d6-4df3-bc06-4769e4fccec2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "efba355afcbce9e57b4c8938a410633c4a42294577c98aa52232667b0ee7871f"
+  },
+  "id": "4olCdeIjLFoxAKHp",
+  "tags": []
+}

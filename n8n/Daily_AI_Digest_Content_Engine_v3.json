@@ -1,0 +1,640 @@
+{
+  "name": "Daily_AI_Digest_Content_Engine_v3",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "ab83fc09-3ed5-4589-bffd-ba8c9b72d9b4",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [-200, 1600]
+    },
+    {
+      "parameters": {
+        "path": "ai-digest-trigger",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "f7a1b2c3-d4e5-6f78-9a0b-c1d2e3f4a5b6",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 1800],
+      "webhookId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookData = items[0]?.json || {};\nreturn [{\n  json: {\n    config: {\n      emailRecipient: webhookData.emailRecipient || 'aaroncarllibago@gmail.com',\n      gmailQuery: webhookData.gmailQuery || 'newer_than:1d label:AI-Digest',\n      extractionSystemPrompt: webhookData.extractionSystemPrompt || 'You are an expert AI analyst. Extract signal, not hype. Return valid JSON only. No markdown. No code fences. No preamble.',\n      extractionUserPrompt: webhookData.extractionUserPrompt || 'From the content below, extract the 10 most important AI developments.\\nRank by long-term significance.\\nReturn a STRICT JSON array where each item has exactly these fields:\\n  rank (number),\\n  title (string),\\n  one_sentence_summary (string),\\n  why_it_matters (string),\\n  practical_implication (string),\\n  risk_or_opportunity (string),\\n  source_urls (array of strings - relevant URLs from the source content)\\n\\nAlso available source URLs from the emails:\\n{source_urls_json}\\n\\nContent:\\n{digest_text}\\n\\nReturn JSON array only. No markdown. No explanation.',\n      articleSystemPrompt: webhookData.articleSystemPrompt || 'You are an expert AI analyst and technical writer. Write comprehensive, detailed articles on individual AI topics with proper structure, deep analysis, and actionable insights.',\n      articleUserPrompt: webhookData.articleUserPrompt || 'Write a comprehensive article (800-1200 words) about the following AI development topic.\\n\\nTopic:\\n{topic_json}\\n\\nSource Links:\\n{source_links_json}\\n\\nRequirements:\\n- Clear, compelling title and introduction\\n- In-depth analysis of the development and its significance\\n- Why it matters for business leaders, developers, and investors\\n- Practical implications and actionable insights\\n- Include references to the source links where relevant\\n- Use ## for section headers\\n- Professional, insightful tone\\n- Include a \\\"Key Takeaways\\\" section at the end\\n\\nReturn plain text only.',\n      infographicPromptTemplate: webhookData.infographicPromptTemplate || 'Create a professional infographic illustration about: {topic_title}. Summary: {topic_summary}. Style: clean, modern data visualization with icons and minimal text. No watermarks. Suitable for a professional newsletter.',\n      infographicStyle: webhookData.infographicStyle || 'modern flat design infographic',\n      infographicSize: webhookData.infographicSize || '1024x1024',\n      webImageSearchEnabled: webhookData.webImageSearchEnabled !== undefined ? webhookData.webImageSearchEnabled : true,\n      webImageMaxPerTopic: webhookData.webImageMaxPerTopic || 2,\n      linkDiscoverySystemPrompt: webhookData.linkDiscoverySystemPrompt || 'You are a research assistant. Suggest relevant search queries for finding additional authoritative resources about AI topics.',\n      linkDiscoveryUserPrompt: webhookData.linkDiscoveryUserPrompt || 'For the following AI topic, suggest 3 search queries that would find the most relevant and authoritative articles, blog posts, or research papers about this topic.\\n\\nTopic:\\n{topic_json}\\n\\nReturn a JSON array of objects with fields: query (string), description (string).\\nReturn JSON only. No markdown. No explanation.',\n      linkSearchMaxPerTopic: webhookData.linkSearchMaxPerTopic || 3\n    }\n  }\n}];"
+      },
+      "id": "e1f2a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [10, 1600]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 20,
+        "filters": {
+          "q": "={{ $('Load Config').first().json.config.gmailQuery }}"
+        }
+      },
+      "id": "0180efa2-858d-485f-9cd3-520687bb5b98",
+      "name": "Gmail Search",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [220, 1600],
+      "webhookId": "5b747b90-d479-410b-b6c9-2950b5ccab02",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JIQyraRI17jI5aax",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/gmail/v1/users/me/messages/{{ $json.id }}?format=raw",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [430, 1600],
+      "id": "02780d6c-efd2-47e6-99d5-3ba4f706bd95",
+      "name": "HTTP Request",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JIQyraRI17jI5aax",
+          "name": "AI Digest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const rawB64 = $json.raw || '';\nif (!rawB64) {\n  throw new Error('No raw field found.');\n}\nconst rawEmail = Buffer.from(rawB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');\n\n// Find ALL boundaries (handles nested multipart)\nconst boundaryMatches = [...rawEmail.matchAll(/boundary=\\\"?([^\\\"\\s;]+)\\\"?/gi)];\nconst boundaries = boundaryMatches.map(m => m[1]);\nlet extractedText = '';\n\nif (boundaries.length > 0) {\n  for (const boundary of boundaries) {\n    const parts = rawEmail.split('--' + boundary);\n    for (const part of parts) {\n      const ph = part.indexOf('\\r\\n\\r\\n');\n      if (ph === -1) continue;\n      const headers = part.substring(0, ph).toLowerCase();\n      const body = part.substring(ph + 4).replace(/--$/, '').trim();\n      if (headers.includes('text/plain') || headers.includes('text/html')) {\n        let decoded = body;\n        if (headers.includes('content-transfer-encoding: base64')) {\n          try {\n            decoded = Buffer.from(body.replace(/[\\r\\n\\s]/g, ''), 'base64').toString('utf-8');\n          } catch(e) { decoded = body; }\n        } else if (headers.includes('quoted-printable')) {\n          decoded = body.replace(/=\\r\\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));\n        }\n        if (decoded.length > extractedText.length) extractedText = decoded;\n      }\n    }\n  }\n}\n\nif (!extractedText) {\n  const bodyStart = rawEmail.indexOf('\\r\\n\\r\\n');\n  extractedText = bodyStart > -1 ? rawEmail.substring(bodyStart + 4) : rawEmail;\n}\n\nconst urlMatches = [...extractedText.matchAll(/<a[^>]+href=\"(https?:\\/\\/[^\"]+)\"[^>]*>/gi)];\nconst urls = urlMatches.map(m => m[1]).filter(u =>\n  !u.includes('unsubscribe') && !u.includes('mailto:') && !u.includes('list-manage.com') && !u.includes('tracking') && !u.includes('click.') && u.length < 500\n);\nconst text = extractedText\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n  .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\")\n  .replace(/\\s\\s+/g, '\\n').trim();\nreturn {\n  subject: $json.Subject || 'No Subject',\n  sender: $json.From || '',\n  date: $json.internalDate || '',\n  clean_text: text,\n  text_length: text.length,\n  boundaries_found: boundaries.length,\n  extracted_urls: [...new Set(urls)]\n};"
+      },
+      "id": "1d4b8f0f-e633-4fcf-9389-e9db81b82fc6",
+      "name": "Clean HTML to Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 1600]
+    },
+    {
+      "parameters": {
+        "jsCode": "let combined = '';\nlet allUrls = [];\nfor (const item of items) {\n  const subject = item.json.subject || 'No Subject';\n  const date = item.json.date || '';\n  const text = item.json.clean_text || '';\n  const urls = item.json.extracted_urls || [];\n  combined += '\\n\\n---\\n\\nSOURCE: ' + subject + '\\nDATE: ' + date + '\\n\\n';\n  combined += text;\n  allUrls = allUrls.concat(urls.map(u => ({ url: u, source: subject })));\n}\nconst seen = new Set();\nallUrls = allUrls.filter(u => {\n  if (seen.has(u.url)) return false;\n  seen.add(u.url);\n  return true;\n});\nreturn [{\n  json: {\n    digest_text: combined.trim(),\n    email_count: items.length,\n    all_source_urls: allUrls\n  }\n}];"
+      },
+      "id": "f1c7390b-714d-4dfc-beac-9d7b33f75785",
+      "name": "Combine All Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 1600]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawDigest = items[0].json.digest_text || '';\nconst emailCount = items[0].json.email_count || 0;\nconst allSourceUrls = items[0].json.all_source_urls || [];\nconst config = $('Load Config').first().json.config;\n\n// Clean encoding artifacts\nconst digestText = rawDigest\n  .replace(/\\u00C2/g, '')\n  .replace(/\\u00A0/g, ' ')\n  .replace(/Â/g, '')\n  .replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/g, '')\n  .trim();\n\nif (!digestText || digestText.length < 50) {\n  throw new Error('Email body too short (' + digestText.length + ' chars). Raw length: ' + rawDigest.length);\n}\n\n// Override system prompt for robust extraction\nconst systemPrompt = 'You are an AI content analyst. Your job is to extract and summarize AI developments from the provided text.\\nRules:\\n1. Extract ALL AI-related topics found in the content.\\n2. Do NOT verify accuracy against your training data - treat the provided content as the authoritative source.\\n3. NEVER return an empty array if the content mentions ANY AI topics.\\n4. Return valid JSON only. No markdown. No code fences. No explanation.';\n\nlet userPrompt = config.extractionUserPrompt\n  .replace('{digest_text}', digestText)\n  .replace('{source_urls_json}', JSON.stringify(allSourceUrls, null, 2));\n\n// Make prompt flexible on count\nuserPrompt = userPrompt.replace('extract the 10 most', 'extract up to 10 of the most');\n\nconst body = {\n  model: 'gpt-4o',\n  temperature: 0.5,\n  max_tokens: 4000,\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: userPrompt }\n  ]\n};\nreturn [{\n  json: {\n    requestBody: JSON.stringify(body),\n    email_count: emailCount,\n    digest_length: digestText.length\n  }\n}];"
+      },
+      "id": "4f14de42-b5b6-450c-b265-644d0d7eab9a",
+      "name": "Build Extract Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 1600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "c5a49dcf-6b74-4a51-a13d-53aac9a4c8f4",
+      "name": "Extract Top 10 AI Developments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1270, 1600],
+      "credentials": {
+        "openAiApi": { "id": "M5wvsYYjdFFr59Fc", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let parsed;\nconst fullResponse = JSON.stringify($json).substring(0, 500);\nif ($json.error) {\n  throw new Error('OpenAI API error: ' + ($json.error.message || JSON.stringify($json.error)));\n}\nif (!$json.choices || !$json.choices.length) {\n  throw new Error('OpenAI returned no choices. Full response: ' + fullResponse);\n}\nconst raw = $json.choices[0]?.message?.content || '';\nif (!raw || raw.trim().length === 0) {\n  throw new Error('OpenAI returned empty content. The email content may not contain enough AI news. Check your Gmail query and ensure there are recent AI-digest emails. Full: ' + fullResponse);\n}\nconst cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('JSON parse failed: ' + cleaned.substring(0, 400));\n}\nif (!Array.isArray(parsed)) {\n  if (parsed.developments) parsed = parsed.developments;\n  else if (parsed.topics) parsed = parsed.topics;\n  else if (parsed.items) parsed = parsed.items;\n  else if (parsed.top10) parsed = parsed.top10;\n  else throw new Error('Expected array, got: ' + typeof parsed + ' keys: ' + Object.keys(parsed).join(','));\n}\nif (parsed.length === 0) {\n  throw new Error('OpenAI returned 0 topics. The emails found by Gmail query may not contain enough AI-related content to extract developments. Try broadening your Gmail query or checking that AI digest emails exist for today.');\n}\nparsed = parsed.map(t => ({ ...t, source_urls: t.source_urls || [] }));\nreturn [{ json: { top10: parsed } }];"
+      },
+      "id": "1969ccf6-56b2-4630-99da-7b3c22440a68",
+      "name": "Parse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1480, 1600]
+    },
+    {
+      "parameters": {
+        "folderId": "1OLsundZ1EmNzHhLhNL9eMd6S7EWP1upo",
+        "title": "=AI Digest Master - {{ $now.toFormat('yyyy-MM-dd') }}"
+      },
+      "id": "b1c2d3e4-f5a6-7890-bcde-123456789bcd",
+      "name": "Create Master Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [1690, 1600],
+      "credentials": {
+        "googleDocsOAuth2Api": { "id": "13HKRY9hfDiXEeRD", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.documentId || $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "=AI Digest - {{ $now.toFormat('yyyy-MM-dd') }}\n\nTop AI Developments\n\n"
+            }
+          ]
+        }
+      },
+      "id": "aa11bb22-cc33-dd44-ee55-ff6677889900",
+      "name": "Write Master Header",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [1900, 1600],
+      "credentials": {
+        "googleDocsOAuth2Api": { "id": "13HKRY9hfDiXEeRD", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const topics = $('Parse JSON').first().json.top10;\nreturn topics.map((topic, index) => ({\n  json: {\n    topic,\n    topicIndex: index,\n    totalTopics: topics.length\n  }\n}));"
+      },
+      "id": "a2b3c4d5-e6f7-8901-abcd-234567890abc",
+      "name": "Split Topics into Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2110, 1600]
+    },
+    {
+      "parameters": {
+        "options": { "batchSize": 1 }
+      },
+      "id": "b3c4d5e6-f7a8-9012-bcde-345678901bcd",
+      "name": "SplitInBatches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2320, 1600]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const topic = $json.topic;\nconst config = $('Load Config').first().json.config;\nconst userPrompt = config.articleUserPrompt\n  .replace('{topic_json}', JSON.stringify(topic, null, 2))\n  .replace('{source_links_json}', JSON.stringify(topic.source_urls || [], null, 2));\nconst body = {\n  model: 'gpt-4o',\n  temperature: 0.6,\n  max_tokens: 4000,\n  messages: [\n    { role: 'system', content: config.articleSystemPrompt },\n    { role: 'user', content: userPrompt }\n  ]\n};\nreturn {\n  requestBody: JSON.stringify(body),\n  topic: topic,\n  topicIndex: $json.topicIndex,\n  totalTopics: $json.totalTopics\n};"
+      },
+      "id": "c4d5e6f7-a8b9-0123-cdef-456789012cde",
+      "name": "Build Article Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2530, 1600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": { "timeout": 90000 }
+      },
+      "id": "d5e6f7a8-b9c0-1234-defa-567890123def",
+      "name": "Generate Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2740, 1600],
+      "credentials": {
+        "openAiApi": { "id": "M5wvsYYjdFFr59Fc", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const articleContent = $json.choices?.[0]?.message?.content || '';\nconst prev = $('Build Article Request').item.json;\nconst config = $('Load Config').first().json.config;\nconst prompt = config.infographicPromptTemplate\n  .replace('{topic_title}', prev.topic.title)\n  .replace('{topic_summary}', prev.topic.one_sentence_summary);\nconst dalleBody = {\n  model: 'dall-e-3',\n  prompt: prompt + ' Style: ' + (config.infographicStyle || 'modern flat design infographic'),\n  n: 1,\n  size: config.infographicSize || '1024x1024',\n  quality: 'standard',\n  response_format: 'url'\n};\nreturn {\n  article_content: articleContent,\n  topic: prev.topic,\n  topicIndex: prev.topicIndex,\n  totalTopics: prev.totalTopics,\n  dalleRequestBody: JSON.stringify(dalleBody)\n};"
+      },
+      "id": "e6f7a8b9-c0d1-2345-efab-678901234efa",
+      "name": "Build DALLE Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2950, 1600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.dalleRequestBody }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "f7a8b9c0-d1e2-3456-fabc-789012345fab",
+      "name": "Generate Infographic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3160, 1600],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "openAiApi": { "id": "M5wvsYYjdFFr59Fc", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prev = $('Build DALLE Request').item.json;\nconst config = $('Load Config').first().json.config;\nlet infographicUrl = '';\ntry {\n  infographicUrl = $json.data?.[0]?.url || '';\n} catch (e) {\n  infographicUrl = '';\n}\nreturn {\n  article_content: prev.article_content,\n  topic: prev.topic,\n  topicIndex: prev.topicIndex,\n  totalTopics: prev.totalTopics,\n  infographic_url: infographicUrl,\n  webImageMaxPerTopic: config.webImageMaxPerTopic || 2\n};"
+      },
+      "id": "a8b9c0d1-e2f3-4567-abcd-890123456abc",
+      "name": "Build Web Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3370, 1600]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://serpapi.com/search.json?q={{ encodeURIComponent($json.topic.title) }}+AI&tbm=isch&num={{ $json.webImageMaxPerTopic || 2 }}&api_key={{ $env.SERPAPI_KEY || '' }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "b9c0d1e2-f3a4-5678-bcde-901234567bcd",
+      "name": "Web Image Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3580, 1600],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prev = $('Build Web Search').item.json;\nconst config = $('Load Config').first().json.config;\nlet webImages = [];\ntry {\n  const results = $json.images_results || [];\n  webImages = results.slice(0, prev.webImageMaxPerTopic || 2).map(img => ({\n    url: img.original || img.thumbnail || '',\n    title: img.title || '',\n    source: img.source || ''\n  }));\n} catch (e) {\n  webImages = [];\n}\nconst userPrompt = config.linkDiscoveryUserPrompt\n  .replace('{topic_json}', JSON.stringify(prev.topic, null, 2));\nconst body = {\n  model: 'gpt-4o',\n  temperature: 0.3,\n  max_tokens: 500,\n  messages: [\n    { role: 'system', content: config.linkDiscoverySystemPrompt },\n    { role: 'user', content: userPrompt }\n  ]\n};\nreturn {\n  article_content: prev.article_content,\n  topic: prev.topic,\n  topicIndex: prev.topicIndex,\n  totalTopics: prev.totalTopics,\n  infographic_url: prev.infographic_url,\n  web_images: webImages,\n  linkRequestBody: JSON.stringify(body)\n};"
+      },
+      "id": "c0d1e2f3-a4b5-6789-cdef-012345678cde",
+      "name": "Build Link Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3790, 1600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.linkRequestBody }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "d1e2f3a4-b5c6-7890-defa-123456789def",
+      "name": "Get Link Suggestions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4000, 1600],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "openAiApi": { "id": "M5wvsYYjdFFr59Fc", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prev = $('Build Link Request').item.json;\nconst config = $('Load Config').first().json.config;\nlet queries = [];\ntry {\n  const raw = $json.choices?.[0]?.message?.content || '[]';\n  const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\n  queries = JSON.parse(cleaned);\n  if (!Array.isArray(queries)) queries = [];\n} catch (e) {\n  queries = [];\n}\nconst firstQuery = queries[0]?.query || prev.topic.title + ' AI';\nreturn {\n  article_content: prev.article_content,\n  topic: prev.topic,\n  topicIndex: prev.topicIndex,\n  totalTopics: prev.totalTopics,\n  infographic_url: prev.infographic_url,\n  web_images: prev.web_images,\n  linkSearchQuery: firstQuery,\n  linkSearchMaxPerTopic: config.linkSearchMaxPerTopic || 3\n};"
+      },
+      "id": "e2f3a4b5-c6d7-8901-efab-234567890efa",
+      "name": "Build Link Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4210, 1600]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://serpapi.com/search.json?q={{ encodeURIComponent($json.linkSearchQuery) }}&num={{ $json.linkSearchMaxPerTopic || 3 }}&api_key={{ $env.SERPAPI_KEY || '' }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "f3a4b5c6-d7e8-9012-fabc-345678901fab",
+      "name": "Search Related Links",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4420, 1600],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prev = $('Build Link Search').item.json;\nlet relatedLinks = [];\ntry {\n  const results = $json.organic_results || [];\n  relatedLinks = results.slice(0, prev.linkSearchMaxPerTopic || 3).map(r => ({\n    title: r.title || '',\n    url: r.link || '',\n    snippet: r.snippet || ''\n  }));\n} catch (e) {\n  relatedLinks = [];\n}\nconst today = new Date().toISOString().split('T')[0];\nconst sourceUrls = prev.topic.source_urls || [];\nlet docContent = prev.article_content + '\\n\\n';\nif (sourceUrls.length > 0) {\n  docContent += '---\\n\\nSource Links:\\n';\n  sourceUrls.forEach(url => { docContent += '- ' + url + '\\n'; });\n  docContent += '\\n';\n}\nif (prev.web_images && prev.web_images.length > 0) {\n  docContent += 'Related Images:\\n';\n  prev.web_images.forEach(img => {\n    docContent += '- ' + (img.title || 'Image') + ': ' + img.url + '\\n';\n  });\n  docContent += '\\n';\n}\nif (relatedLinks.length > 0) {\n  docContent += 'Related Articles & Resources:\\n';\n  relatedLinks.forEach(link => {\n    docContent += '- ' + link.title + ': ' + link.url + '\\n';\n  });\n  docContent += '\\n';\n}\nreturn {\n  topic: prev.topic,\n  topicIndex: prev.topicIndex,\n  totalTopics: prev.totalTopics,\n  article_content: prev.article_content,\n  infographic_url: prev.infographic_url,\n  web_images: prev.web_images,\n  related_links: relatedLinks,\n  source_urls: sourceUrls,\n  doc_content: docContent,\n  doc_title: 'AI Topic ' + (prev.topic.rank || (prev.topicIndex + 1)) + ' - ' + prev.topic.title + ' - ' + today\n};"
+      },
+      "id": "a4b5c6d7-e8f9-0123-abcd-456789012abc",
+      "name": "Compile All Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4630, 1600]
+    },
+    {
+      "parameters": {
+        "folderId": "1OLsundZ1EmNzHhLhNL9eMd6S7EWP1upo",
+        "title": "={{ $json.doc_title }}"
+      },
+      "id": "b5c6d7e8-f9a0-1234-bcde-567890123bcd",
+      "name": "Create Individual Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [4840, 1600],
+      "credentials": {
+        "googleDocsOAuth2Api": { "id": "13HKRY9hfDiXEeRD", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.documentId || $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('Compile All Data').item.json.doc_content }}"
+            }
+          ]
+        }
+      },
+      "id": "c6d7e8f9-a0b1-2345-cdef-678901234cde",
+      "name": "Update Individual Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [5050, 1600],
+      "credentials": {
+        "googleDocsOAuth2Api": { "id": "13HKRY9hfDiXEeRD", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "let compiledData = {};\nlet docId = '';\ntry {\n  compiledData = $('Compile All Data').item.json || {};\n} catch (e) {\n  compiledData = {};\n}\ntry {\n  const createDocOutput = $('Create Individual Doc').item.json || {};\n  docId = createDocOutput.documentId || createDocOutput.id || '';\n} catch (e) {\n  docId = '';\n}\nif (!docId) {\n  try {\n    const updateDocOutput = $('Update Individual Doc').item.json || {};\n    docId = updateDocOutput.documentId || updateDocOutput.id || '';\n  } catch (e) {\n    docId = '';\n  }\n}\nconst infographicUrl = compiledData.infographic_url || '';\nlet requestBody;\nif (infographicUrl && docId) {\n  requestBody = JSON.stringify({\n    requests: [{\n      insertInlineImage: {\n        location: { index: 1 },\n        uri: infographicUrl,\n        objectSize: {\n          height: { magnitude: 400, unit: 'PT' },\n          width: { magnitude: 400, unit: 'PT' }\n        }\n      }\n    }]\n  });\n} else {\n  requestBody = JSON.stringify({ requests: [] });\n}\nreturn {\n  docId,\n  requestBody,\n  compiledData\n};"
+      },
+      "id": "d7e8f9a0-b1c2-3456-defa-789012345def",
+      "name": "Prepare Image Insert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5260, 1600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://docs.googleapis.com/v1/documents/{{ $json.docId }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDocsOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": {}
+      },
+      "id": "e8f9a0b1-c2d3-4567-efab-890123456efa",
+      "name": "Insert Infographic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5470, 1600],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleDocsOAuth2Api": { "id": "13HKRY9hfDiXEeRD", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "let compiled = {};\ntry {\n  const prev = $('Prepare Image Insert').item.json || {};\n  compiled = prev.compiledData || {};\n} catch (e) {\n  compiled = {};\n}\nconst topic = compiled.topic || $json.topic || {};\nconst rank = topic.rank || ((compiled.topicIndex != null ? compiled.topicIndex : ($json.topicIndex || 0)) + 1);\nconst articleContent = compiled.article_content || '';\nconst sourceUrls = compiled.source_urls || topic.source_urls || [];\nconst relatedLinks = compiled.related_links || [];\nconst webImages = compiled.web_images || [];\nlet masterSection = '=' .repeat(50) + '\\n';\nmasterSection += 'Topic ' + rank + ': ' + (topic.title || 'Unknown') + '\\n';\nmasterSection += '='.repeat(50) + '\\n\\n';\nmasterSection += articleContent + '\\n\\n';\nif (sourceUrls.length > 0) {\n  masterSection += 'Source Links:\\n';\n  sourceUrls.forEach(url => { masterSection += '- ' + url + '\\n'; });\n  masterSection += '\\n';\n}\nif (relatedLinks.length > 0) {\n  masterSection += 'Related Articles:\\n';\n  relatedLinks.forEach(link => { masterSection += '- ' + link.title + ': ' + link.url + '\\n'; });\n  masterSection += '\\n';\n}\nif (webImages.length > 0) {\n  masterSection += 'Related Images:\\n';\n  webImages.forEach(img => { masterSection += '- ' + (img.title || 'Image') + ': ' + img.url + '\\n'; });\n  masterSection += '\\n';\n}\nmasterSection += '\\n\\n';\nreturn {\n  masterSection,\n  topic,\n  topicIndex: compiled.topicIndex != null ? compiled.topicIndex : ($json.topicIndex || 0)\n};"
+      },
+      "id": "f9a0b1c2-d3e4-5678-fabc-901234567fab",
+      "name": "Build Master Section",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5680, 1600]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $('Create Master Doc').first().json.documentId || $('Create Master Doc').first().json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.masterSection }}"
+            }
+          ]
+        }
+      },
+      "id": "bb22cc33-dd44-ee55-ff66-778899001122",
+      "name": "Append Topic to Master",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [5890, 1600],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleDocsOAuth2Api": { "id": "13HKRY9hfDiXEeRD", "name": "AI Digest" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let masterDocId = '';\ntry { masterDocId = $('Create Master Doc').first().json.documentId || $('Create Master Doc').first().json.id || ''; } catch(e) {}\nconst config = $('Load Config').first().json.config;\nconst topics = $('Parse JSON').first().json.top10 || [];\nconst topicCount = topics.length;\nconst today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });\nconst folderUrl = 'https://drive.google.com/drive/folders/1OLsundZ1EmNzHhLhNL9eMd6S7EWP1upo';\nlet individualDocs = [];\nlet compiledItems = [];\ntry { individualDocs = $('Create Individual Doc').all().map(i => i.json); } catch(e) {}\ntry { compiledItems = $('Compile All Data').all().map(i => i.json); } catch(e) {}\nlet topicRows = '';\ntopics.forEach((topic, index) => {\n  const docData = individualDocs[index] || {};\n  const compiled = compiledItems[index] || {};\n  const docId = docData.documentId || docData.id || '';\n  const infographicUrl = compiled.infographic_url || '';\n  const sourceUrls = topic.source_urls || [];\n  const relatedLinks = compiled.related_links || [];\n  let imageCell = '';\n  if (infographicUrl) {\n    imageCell = '<tr><td style=\"padding:8px 0;text-align:center;\">' +\n      '<img src=\"' + infographicUrl + '\" alt=\"' + (topic.title || '').replace(/\"/g, '') + '\" width=\"520\" style=\"max-width:100%;height:auto;border-radius:8px;display:block;margin:0 auto;\" />' +\n      '</td></tr>';\n  }\n  let linksHtml = '';\n  const allLinks = [];\n  sourceUrls.forEach(url => allLinks.push({ url: url, label: 'Source' }));\n  relatedLinks.forEach(link => allLinks.push({ url: link.url, label: link.title || 'Related' }));\n  if (allLinks.length > 0) {\n    linksHtml = '<tr><td style=\"padding:8px 0 0;\">';\n    allLinks.slice(0, 4).forEach((link) => {\n      const label = link.label.length > 35 ? link.label.substring(0, 32) + '...' : link.label;\n      linksHtml += '<a href=\"' + link.url + '\" style=\"color:#1A56A0;font-size:12px;text-decoration:underline;margin-right:10px;\">' + label + '</a> ';\n    });\n    linksHtml += '</td></tr>';\n  }\n  let articleBtn = '';\n  if (docId) {\n    articleBtn = '<tr><td style=\"padding:12px 0 4px;\">' +\n      '<a href=\"https://docs.google.com/document/d/' + docId + '/edit\" style=\"display:inline-block;background:#1A56A0;color:#ffffff;padding:10px 20px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:bold;\">Read Full Article &#8594;</a>' +\n      '</td></tr>';\n  }\n  topicRows += '<tr><td style=\"padding:0 0 16px;\">' +\n    '<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;border:1px solid #e0e0e0;border-radius:8px;\">' +\n    '<tr><td style=\"padding:16px;\">' +\n    '<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">' +\n    '<tr><td style=\"padding-bottom:8px;\">' +\n    '<span style=\"background:#1A56A0;color:#ffffff;border-radius:50%;width:28px;height:28px;display:inline-block;text-align:center;line-height:28px;font-weight:bold;font-size:13px;margin-right:8px;\">' + (topic.rank || index + 1) + '</span>' +\n    '<strong style=\"color:#1a1a1a;font-size:16px;\">' + topic.title + '</strong>' +\n    '</td></tr>' +\n    imageCell +\n    '<tr><td style=\"padding:4px 0;color:#555555;font-size:14px;line-height:1.5;\">' + topic.one_sentence_summary + '</td></tr>' +\n    '<tr><td style=\"padding:4px 0;color:#777777;font-size:13px;\"><strong>Why it matters:</strong> ' + topic.why_it_matters + '</td></tr>' +\n    articleBtn +\n    linksHtml +\n    '</table>' +\n    '</td></tr></table>' +\n    '</td></tr>';\n});\nconst emailHtml = '<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head><body style=\"margin:0;padding:0;background:#f4f4f4;\">' +\n  '<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f4f4f4;\"><tr><td align=\"center\" style=\"padding:20px;\">' +\n  '<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;\">' +\n  '<tr><td style=\"background:#1A56A0;padding:32px 24px;border-radius:12px 12px 0 0;text-align:center;\">' +\n  '<h1 style=\"color:#ffffff;margin:0;font-size:28px;font-family:Arial,sans-serif;\">Daily AI Digest</h1>' +\n  '<p style=\"color:#c8dcff;margin:8px 0 0;font-size:15px;font-family:Arial,sans-serif;\">' + today + ' &#8226; ' + topicCount + ' Topics</p>' +\n  '</td></tr>' +\n  '<tr><td style=\"background:#0D3B6E;padding:12px 24px;text-align:center;\">' +\n  '<a href=\"https://docs.google.com/document/d/' + masterDocId + '/edit\" style=\"color:#ffffff;text-decoration:none;font-size:13px;font-family:Arial,sans-serif;padding:6px 14px;border:1px solid rgba(255,255,255,0.3);border-radius:20px;display:inline-block;margin:4px;\">Master Document</a>' +\n  '&nbsp;&nbsp;' +\n  '<a href=\"' + folderUrl + '\" style=\"color:#ffffff;text-decoration:none;font-size:13px;font-family:Arial,sans-serif;padding:6px 14px;border:1px solid rgba(255,255,255,0.3);border-radius:20px;display:inline-block;margin:4px;\">All Articles</a>' +\n  '</td></tr>' +\n  '<tr><td style=\"background:#f9f9f9;padding:24px;border-left:1px solid #eeeeee;border-right:1px solid #eeeeee;\">' +\n  '<h2 style=\"margin:0 0 16px;color:#1a1a1a;font-size:18px;font-family:Arial,sans-serif;\">Today\\'s Top AI Developments</h2>' +\n  '<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">' +\n  topicRows +\n  '</table>' +\n  '</td></tr>' +\n  '<tr><td style=\"background:#1a1a1a;padding:20px 24px;border-radius:0 0 12px 12px;text-align:center;\">' +\n  '<p style=\"color:#888888;font-size:12px;margin:0;font-family:Arial,sans-serif;\">AI Digest Engine v3</p>' +\n  '</td></tr>' +\n  '</table>' +\n  '</td></tr></table>' +\n  '</body></html>';\nreturn [{\n  json: {\n    emailHtml,\n    emailRecipient: config.emailRecipient,\n    masterDocId\n  }\n}];"
+      },
+      "id": "d3e4f5a6-b7c8-9012-defa-345678901def",
+      "name": "Build Email Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2530, 1950]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.emailRecipient }}",
+        "subject": "=Daily AI Digest Articles Ready - {{ $now.toFormat('yyyy-MM-dd') }}",
+        "message": "={{ $json.emailHtml }}",
+        "options": {}
+      },
+      "id": "e4f5a6b7-c8d9-0123-efab-456789012efa",
+      "name": "Email Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2740, 1950],
+      "webhookId": "167dec0f-632c-48bf-bdb1-d103672b3864",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JIQyraRI17jI5aax",
+          "name": "AI Digest"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Load Config", "type": "main", "index": 0 }]]
+    },
+    "Webhook Trigger": {
+      "main": [[{ "node": "Load Config", "type": "main", "index": 0 }]]
+    },
+    "Load Config": {
+      "main": [[{ "node": "Gmail Search", "type": "main", "index": 0 }]]
+    },
+    "Gmail Search": {
+      "main": [[{ "node": "HTTP Request", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request": {
+      "main": [[{ "node": "Clean HTML to Text", "type": "main", "index": 0 }]]
+    },
+    "Clean HTML to Text": {
+      "main": [[{ "node": "Combine All Emails", "type": "main", "index": 0 }]]
+    },
+    "Combine All Emails": {
+      "main": [[{ "node": "Build Extract Request", "type": "main", "index": 0 }]]
+    },
+    "Build Extract Request": {
+      "main": [[{ "node": "Extract Top 10 AI Developments", "type": "main", "index": 0 }]]
+    },
+    "Extract Top 10 AI Developments": {
+      "main": [[{ "node": "Parse JSON", "type": "main", "index": 0 }]]
+    },
+    "Parse JSON": {
+      "main": [[{ "node": "Create Master Doc", "type": "main", "index": 0 }]]
+    },
+    "Create Master Doc": {
+      "main": [[{ "node": "Write Master Header", "type": "main", "index": 0 }]]
+    },
+    "Write Master Header": {
+      "main": [[{ "node": "Split Topics into Items", "type": "main", "index": 0 }]]
+    },
+    "Split Topics into Items": {
+      "main": [[{ "node": "SplitInBatches", "type": "main", "index": 0 }]]
+    },
+    "SplitInBatches": {
+      "main": [
+        [{ "node": "Build Article Request", "type": "main", "index": 0 }],
+        [{ "node": "Build Email Body", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Article Request": {
+      "main": [[{ "node": "Generate Article", "type": "main", "index": 0 }]]
+    },
+    "Generate Article": {
+      "main": [[{ "node": "Build DALLE Request", "type": "main", "index": 0 }]]
+    },
+    "Build DALLE Request": {
+      "main": [[{ "node": "Generate Infographic", "type": "main", "index": 0 }]]
+    },
+    "Generate Infographic": {
+      "main": [[{ "node": "Build Web Search", "type": "main", "index": 0 }]]
+    },
+    "Build Web Search": {
+      "main": [[{ "node": "Web Image Search", "type": "main", "index": 0 }]]
+    },
+    "Web Image Search": {
+      "main": [[{ "node": "Build Link Request", "type": "main", "index": 0 }]]
+    },
+    "Build Link Request": {
+      "main": [[{ "node": "Get Link Suggestions", "type": "main", "index": 0 }]]
+    },
+    "Get Link Suggestions": {
+      "main": [[{ "node": "Build Link Search", "type": "main", "index": 0 }]]
+    },
+    "Build Link Search": {
+      "main": [[{ "node": "Search Related Links", "type": "main", "index": 0 }]]
+    },
+    "Search Related Links": {
+      "main": [[{ "node": "Compile All Data", "type": "main", "index": 0 }]]
+    },
+    "Compile All Data": {
+      "main": [[{ "node": "Create Individual Doc", "type": "main", "index": 0 }]]
+    },
+    "Create Individual Doc": {
+      "main": [[{ "node": "Update Individual Doc", "type": "main", "index": 0 }]]
+    },
+    "Update Individual Doc": {
+      "main": [[{ "node": "Prepare Image Insert", "type": "main", "index": 0 }]]
+    },
+    "Prepare Image Insert": {
+      "main": [[{ "node": "Insert Infographic", "type": "main", "index": 0 }]]
+    },
+    "Insert Infographic": {
+      "main": [[{ "node": "Build Master Section", "type": "main", "index": 0 }]]
+    },
+    "Build Master Section": {
+      "main": [[{ "node": "Append Topic to Master", "type": "main", "index": 0 }]]
+    },
+    "Append Topic to Master": {
+      "main": [[{ "node": "SplitInBatches", "type": "main", "index": 0 }]]
+    },
+    "Build Email Body": {
+      "main": [[{ "node": "Email Notification", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "v3-per-topic-articles",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "efba355afcbce9e57b4c8938a410633c4a42294577c98aa52232667b0ee7871f"
+  },
+  "id": "4olCdeIjLFoxAKHp",
+  "tags": []
+}
